@@ -310,6 +310,8 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
     private val imageAnalyzer by lazy { QrImageAnalyzer(this, lifecycleScope) }
     private val isGoogleLensAvailable by lazy { GoogleLensUtils.isGoogleLensAvailable(this) }
 
+    private var cameraDisabledToastShown = false
+
     private var viewFinderTouchEvent: MotionEvent? = null
     private val gestureDetector by lazy {
         GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
@@ -1213,6 +1215,14 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
         permissionsGatedCallback.runAfterPermissionsCheck()
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+
+        if (hasFocus && cameraDisabledToastShown) {
+            permissionsGatedCallback.runAfterPermissionsCheck()
+        }
+    }
+
     override fun onPause() {
         // Remove location and location updates
         locationListener.unregister()
@@ -1569,6 +1579,12 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
 
         // Observe camera state
         camera.cameraState.observe(this) { cameraState ->
+            if (cameraState.type == CameraXCameraState.Type.OPEN &&
+                    cameraState.error == null) {
+                cameraDisabledToastShown = false
+                viewFinder.isInvisible = false
+            }
+
             cameraState.error?.let {
                 // Log the error
                 Log.e(LOG_TAG, "Error: code: ${it.code}, type: ${it.type}", it.cause)
@@ -1602,10 +1618,14 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
                     }
 
                     CameraXCameraState.ERROR_CAMERA_DISABLED -> {
-                        // No way to fix it without user action, bail out
-                        showToast(R.string.error_camera_disabled)
-                        finish()
-                    }
+                        // Camera access has been disabled by the system. Keep the activity
+                        // alive and hide the preview instead of closing Aperture.
+                        if (!cameraDisabledToastShown) {
+                                showToast(R.string.error_camera_disabled)
+                                cameraDisabledToastShown = true
+                            }
+                            viewFinder.isInvisible = true
+                        }
 
                     CameraXCameraState.ERROR_CAMERA_FATAL_ERROR -> {
                         // No way to fix it without user action, bail out
